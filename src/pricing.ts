@@ -20,6 +20,12 @@ function vwap(entries: { price: number; volumeUsd: number }[]): number | null {
   return sumV > 0 ? sumPV / sumV : null;
 }
 
+type VwapEntry = {
+  price: number;
+  volumeUsd: number;
+  quoteSymbol: string;
+};
+
 // ─────────────────────────────────────────────────────────
 // Core engine
 // ─────────────────────────────────────────────────────────
@@ -32,7 +38,7 @@ export function computePricing(
 
   // Keyed by base_symbol for VWAP aggregation
   // Each entry: { price: base_price_usd, volumeUsd }
-  const vwapEntries: Record<string, { price: number; volumeUsd: number }[]> = {};
+  const vwapEntries: Record<string, VwapEntry[]> = {};
 
   // Side structure for Phase 2.5: stablecoin-target pool data
   const stablecoinPools: { baseSymbol: string; targetSymbol: string; scaledPrice: number; targetVolumeUsd: number }[] = [];
@@ -69,7 +75,11 @@ export function computePricing(
     if (basePriceUsd != null) {
       // Volume in USD (target is a stablecoin)
       if (!vwapEntries[baseSymbol]) vwapEntries[baseSymbol] = [];
-      vwapEntries[baseSymbol].push({ price: basePriceUsd, volumeUsd: targetVolumeUsd });
+      vwapEntries[baseSymbol].push({
+        price: basePriceUsd,
+        volumeUsd: targetVolumeUsd,
+        quoteSymbol: targetSymbol,
+      });
     }
 
     // Store for Phase 2.5 regardless of resolution success
@@ -124,7 +134,11 @@ export function computePricing(
     if (basePriceUsd != null) {
       // Volume in USD using the tracked anchor on the quote side.
       if (!vwapEntries[baseSymbol]) vwapEntries[baseSymbol] = [];
-      vwapEntries[baseSymbol].push({ price: basePriceUsd, volumeUsd: targetVolumeUsd ?? 0 });
+      vwapEntries[baseSymbol].push({
+        price: basePriceUsd,
+        volumeUsd: targetVolumeUsd ?? 0,
+        quoteSymbol: targetSymbol,
+      });
     }
   }
 
@@ -135,11 +149,20 @@ export function computePricing(
 
   for (const pool of stablecoinPools) {
     const { baseSymbol, targetSymbol, scaledPrice, targetVolumeUsd } = pool;
-    const baseVwap = vwap(vwapEntries[baseSymbol] ?? []);
+    // Exclude observations priced through the stablecoin currently being
+    // inferred. Otherwise a base/stablecoin pool can prove its own peg:
+    // (poolPrice * $1 fixed peg) / poolPrice = $1.
+    const independentBaseEntries = (vwapEntries[baseSymbol] ?? [])
+      .filter(entry => entry.quoteSymbol !== targetSymbol);
+    const baseVwap = vwap(independentBaseEntries);
     if (baseVwap == null || scaledPrice === 0) continue;
     const impliedPrice = baseVwap / scaledPrice;
     if (!vwapEntries[targetSymbol]) vwapEntries[targetSymbol] = [];
-    vwapEntries[targetSymbol].push({ price: impliedPrice, volumeUsd: targetVolumeUsd });
+    vwapEntries[targetSymbol].push({
+      price: impliedPrice,
+      volumeUsd: targetVolumeUsd,
+      quoteSymbol: baseSymbol,
+    });
     impliedSymbols.add(targetSymbol);
   }
 
