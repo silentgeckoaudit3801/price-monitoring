@@ -10,6 +10,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "test": "tsx src/pricing.regression.ts",
     "start:compiled": "node dist/index.js",
     "dashboard": "serve . -l 5051"
   },
